@@ -1138,17 +1138,20 @@ export const useConnectionStore = defineStore("connection", () => {
    * 不该被静默丢弃。
    *
    * 只排除可见 schema 选择器的临时草稿连接——它们只活在弹窗交互期间，不会出现在页签里。
+   * 空名连接无法按名字重绑，只跳过「记住连接名」；页签本身仍要按策略关闭/保留，
+   * 否则会留下指向已删除连接的孤儿页签。
    */
   async function applyDeletedConnectionTabHandling(configs: readonly ConnectionConfig[]) {
-    const targets = configs.filter((config) => !isDraftVisibleSchemasConnectionId(config.id) && config.name.trim() !== "");
+    const targets = configs.filter((config) => !isDraftVisibleSchemasConnectionId(config.id));
     if (!targets.length) return;
     const { useQueryStore } = await import("@/stores/queryStore");
     const queryStore = useQueryStore();
     const keep = deletedConnectionTabKeepMode(settingsStore.editorSettings.deleteConnectionTabHandlingMode);
     const remember = settingsStore.editorSettings.rememberConnectionDatabaseOnDelete;
-    if (remember) settingsStore.rememberConnectionDatabases(targets.map((config) => [config.name, config.database, config.db_type] as const));
+    const namedTargets = targets.filter((config) => config.name.trim() !== "");
+    if (remember && namedTargets.length) settingsStore.rememberConnectionDatabases(namedTargets.map((config) => [config.name, config.database, config.db_type] as const));
     for (const config of targets) {
-      queryStore.detachConnectionTabsForDelete(config.id, { keep, connectionName: remember ? config.name : undefined });
+      queryStore.detachConnectionTabsForDelete(config.id, { keep, connectionName: remember && config.name.trim() !== "" ? config.name : undefined });
     }
     // 页签处理是同步的内存操作，但落盘是防抖的。这里立即冲刷，避免随后重启恢复出
     // 已被策略关闭的页签。
@@ -3626,7 +3629,12 @@ export const useConnectionStore = defineStore("connection", () => {
     await persistConnectionDeletion(nextConnections, nextLayout);
     applyConnectionRemoval(removedIds, nextConnections, nextLayout);
     purgeTableVGroupsForConnections(removedIds);
-    await applyDeletedConnectionTabHandling(removedConfigs);
+    // 删除已经落盘完成；页签处理失败只告警，不能让已成功的删除以异常收场。
+    try {
+      await applyDeletedConnectionTabHandling(removedConfigs);
+    } catch (error) {
+      console.warn("[DBX][connection:delete:tab-handling-failed]", { connectionIds: [...removedIds], error });
+    }
     await cleanupRemovedOneTimeConnections(oneTimeIds);
   }
 
@@ -8996,7 +9004,12 @@ export const useConnectionStore = defineStore("connection", () => {
     if (removedConnectionIds.size) {
       applyConnectionRemoval(removedConnectionIds, nextConnections, nextLayout);
       purgeTableVGroupsForConnections(removedConnectionIds);
-      await applyDeletedConnectionTabHandling(removedConnectionConfigs);
+      // 删除已经落盘完成；页签处理失败只告警，不能让已成功的删除以异常收场。
+      try {
+        await applyDeletedConnectionTabHandling(removedConnectionConfigs);
+      } catch (error) {
+        console.warn("[DBX][connection:delete:tab-handling-failed]", { connectionIds: [...removedConnectionIds], error });
+      }
     } else {
       sidebarLayout.value = nextLayout;
       rebuildTreeNodes();
