@@ -15,7 +15,7 @@ deadpool-postgres = { version = "0.14", features = ["rt_tokio_1"] }
 encoding_rs = "0.8"
 futures = "0.3"
 log = "0.4"
-openssl = { version = "0.10", features = ["vendored"] }
+openssl = { version = "0.10" }
 percent-encoding = "2"
 postgres-openssl = "0.5"
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
